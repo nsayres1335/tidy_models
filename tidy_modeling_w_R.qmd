@@ -92,3 +92,81 @@ ames_test <- testing(ames_split)
 ```
 
 Stratified the split on `Sale_Price` since right skewed. Ensure similar distributions in training and test sets.
+
+## 6. Fitting Model w/ Parsnip
+
+```{r}
+#| label: models
+
+lm_model <- linear_reg() |>
+  set_engine("lm")
+
+lm_form_fit <- lm_model |>
+  fit(Sale_Price ~ Longitude + Latitude, data = ames_train)
+
+lm_xy_fit <- lm_model |>
+  fit_xy(
+    x = ames_train |> select(Longitude, Latitude),
+    y = ames_train |> pull(Sale_Price)
+  )
+
+lm_form_fit
+
+lm_xy_fit
+```
+
+2 different ways to fit the same model: using a formula interface and using x/y interface.
+
+
+```{r}
+#| label: tidy
+
+tidy(lm_form_fit)
+```
+
+tidy() in place of summary() for tidy results.
+
+```{r}
+#| label: predict
+
+ames_test_small <- ames_test |> slice(1:5)
+
+predict(lm_form_fit, new_data = ames_test_small)
+```
+
+Predicting on a subset of the test data.
+
+```{r}
+#| label: bind_pred
+
+ames_test_small |>
+  select(Sale_Price) |>
+  bind_cols(predict(lm_form_fit, new_data = ames_test_small)) |>
+  bind_cols(predict(lm_form_fit, ames_test_small, type = "pred_int"))
+```
+
+Binding predictions and prediction intervals to the actual sale prices.
+
+
+```{r}
+#| label: tree
+
+tree_model <-
+  decision_tree(min_n = 2) %>%
+  set_engine("rpart") %>%
+  set_mode("regression")
+
+tree_fit <-
+  tree_model %>%
+  fit(Sale_Price ~ Longitude + Latitude, data = ames_train)
+
+ames_test_small %>%
+  select(Sale_Price) %>%
+  bind_cols(predict(tree_fit, ames_test_small))
+```
+
+Example of using a decision tree model instead of linear regression.
+
+parsnip can support a lot more models ([see](https://parsnip.tidymodels.org/find/)).
+
+Can use **parsnip_addin()** in RStudio to view list of poissible models for each model mode. Unfortunately however, Positron does not currently support RStudio addins.
