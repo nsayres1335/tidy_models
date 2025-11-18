@@ -1,0 +1,84 @@
+---
+title: "Tidy Modeling with R"
+format: html
+date: last-modified
+execute:
+    cache: true
+code-fold: true
+toc: true
+---
+
+## Intro
+
+Code along with the [Tidy Modeling with R](https://www.tmwr.org/) book by Max Kuhn and Julia Silge.
+
+## 4. Ames Housing Data
+
+2,930 properties in Ames, Iowa.
+
+```{r}
+#| label: data
+
+data(ames, package = "modeldata")
+dim(ames)
+```
+
+74 columns covering house characteristics, locations, lot info, ratings, and sales prices.
+
+```{r}
+#| label: libraries
+#| message: false
+
+library(tidymodels)
+tidymodels_prefer()
+```
+
+```{r}
+#| label: distribution
+
+ggplot(ames, aes(x = Sale_Price)) +
+  geom_histogram(bins = 50)
+```
+
+Right skewed distribution. Let's log transform it.
+
+```{r}
+#| label: log-distribution
+
+ggplot(ames, aes(x = Sale_Price)) +
+  geom_histogram(bins = 50) +
+  scale_x_log10()
+```
+
+More normal, better for inference.
+
+```{r}
+#| label: log-transform
+
+ames <- ames |>
+  mutate(Sale_Price = log10(Sale_Price))
+```
+
+Using log10 sale price from here on out.
+
+## 5. Spending our Data
+
+```{r}
+#| label: set-seed
+
+set.seed(501)
+```
+
+```{r}
+#| label: split
+
+ames_split <- initial_split(ames, prop = 0.8)
+ames_split
+
+ames_train <- training(ames_split)
+ames_test <- testing(ames_split)
+
+dim(ames_train)
+```
+
+There are `r dim(ames_train)[[1]]` houses in the training set.
