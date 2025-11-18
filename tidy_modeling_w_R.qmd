@@ -81,4 +81,14 @@ ames_test <- testing(ames_split)
 dim(ames_train)
 ```
 
-There are `r dim(ames_train)[[1]]` houses in the training set.
+There are `r dim(ames_train)[[1]]` and `r dim(ames_test)[[1]]` houses in the training and test sets. respectively.
+
+```{r}
+#| label: split-statrify
+
+ames_split <- initial_split(ames, prop = 0.8, strata = Sale_Price)
+ames_train <- training(ames_split)
+ames_test <- testing(ames_split)
+```
+
+Stratified the split on `Sale_Price` since right skewed. Ensure similar distributions in training and test sets.
