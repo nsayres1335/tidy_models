@@ -170,3 +170,156 @@ Example of using a decision tree model instead of linear regression.
 parsnip can support a lot more models ([see](https://parsnip.tidymodels.org/find/)).
 
 Can use **parsnip_addin()** in RStudio to view list of poissible models for each model mode. Unfortunately however, Positron does not currently support RStudio addins.
+
+## 7. Workflow Basics
+
+Workflows help bundle pre-processing, fit, and post-proc steps.
+
+```{r}
+#| label: workflow-setup
+
+lm_model <- linear_reg() |>
+  set_engine("lm")
+
+lm_wflow <- workflow() |>
+  add_model(lm_model) |>
+  add_formula(Sale_Price ~ Longitude + Latitude)
+```
+
+Adding model and pre-processing (formula) to the workflow.
+
+```{r}
+#| label: workflow-fit
+
+lm_fit <- fit(lm_wflow, ames_train)
+lm_fit
+```
+
+Workflows have a fit() method that cas be used to fit the model.
+
+
+```{r}
+#| label: workflow-predict
+
+predict(lm_fit, ames_test |> slice(1:5))
+```
+
+Can also use predict() method on the fitted workflow.
+
+```{r}
+#| label: workflow-update
+
+lm_fit |> update_formula(Sale_Price ~ Longitude)
+```
+
+Can update the workflow to change the formula or model.
+
+```{r}
+#| label: workflow-add-vars
+
+lm_wflow <- lm_wflow |>
+  remove_formula() |>
+  add_variables(outcomes = Sale_Price, predictors = c(Longitude, Latitude))
+
+lm_wflow
+  ```
+
+Can also add variables instead of a formula. Works w/ dplyr grammar. Facilitates more complex moedeling specs. Particularly useful w/ models such as glmnet and xgboost which expect user to make indicator vars from factor preds.
+
+
+```{r}
+#| label: handling-special-multilevel
+
+# install.packages("multilevelmod")
+library(multilevelmod)
+
+multilevel_spec <- linear_reg() %>% set_engine("lmer")
+
+multilevel_workflow <-
+  workflow() %>%
+  # Pass the data along as-is:
+  add_variables(outcome = distance, predictors = c(Sex, age, Subject)) %>%
+  add_model(
+    multilevel_spec,
+    # This formula is given to the model
+    formula = distance ~ Sex + (age | Subject)
+  )
+
+multilevel_fit <- fit(multilevel_workflow, data = Orthodont)
+multilevel_fit
+```
+
+Standard R methods can't properly process this formula. Workflows handles by using optional suplementary model forumla argument in add_model(). add_variable() specifies bare col names; add_model() takes the actual formula given to the model.
+
+```{r}
+#| label: handling-special-survival
+
+# install.packages("censored")
+library(censored)
+
+parametric_spec <- survival_reg()
+
+parametric_workflow <-
+  workflow() %>%
+  add_variables(outcome = c(fustat, futime), predictors = c(age, rx)) %>%
+  add_model(parametric_spec, formula = Surv(futime, fustat) ~ age + strata(rx))
+
+parametric_fit <- fit(parametric_workflow, data = ovarian)
+parametric_fit
+```
+
+Another example using a survival analysis model.
+
+```{r}
+#| label: workflowsets-setup
+
+library(workflowsets)
+
+location <- list(
+  longitude = Sale_Price ~ Longitude,
+  latitude = Sale_Price ~ Latitude,
+  coords = Sale_Price ~ Longitude + Latitude,
+  neighborhood = Sale_Price ~ Neighborhood
+)
+
+location_models <-
+  workflow_set(
+    preproc = location,
+    models = list(lm = lm_model)
+  )
+
+location_models
+
+location_models$info[[1]]
+
+extract_workflow(location_models, id = "coords_lm")
+```
+
+workflowsets package to create a set of workflows to compare different pre-processing and model combinations. Useful for finding best predictive models or assessing predictors.
+
+```{r}
+#| label: workflowsets-fit
+
+location_models <- location_models |>
+  mutate(fit = map(info, ~ fit(.x$workflow[[1]], ames_train)))
+
+location_models
+
+location_models$fit[[1]]
+```
+
+Iterating info column to fit each workflow and mutating onto existing tibble for tidyness.
+
+```{r}
+#| label: eval-test-set
+
+final_lm_res <- last_fit(lm_wflow, ames_split)
+final_lm_res
+
+fitted_lm_wflow <- extract_workflow(final_lm_res)
+
+collect_metrics(final_lm_res)
+collect_predictions(final_lm_res) %>% slice(1:5)
+```
+
+**last_fit()** convenience function to fit final model to entire training set and evaluate on the test set in one step. Returns a tibble with the fitted workflow, metrics, and predictions. Each have helper functions to extract/collect them.
