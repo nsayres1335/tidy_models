@@ -653,3 +653,71 @@ dplyr syntax works for autoplot() as well.
 # Tools for Creating Effective Models
 
 ## 10. Resampling for Evaluating Performance
+
+```{r}
+#| label: lib-ranger
+
+# install.packages("ranger")
+```
+
+```{r}
+#| label: rf-model
+
+rf_model <-
+  rand_forest(trees = 1000) |> 
+  set_engine("ranger") |> 
+  set_mode("regression")
+
+rf_wflow <- 
+  workflow() |> 
+  add_formula(
+    Sale_Price ~ Neighborhood + Gr_Liv_Area + Year_Built + Bldg_Type +
+      Latitude + Longitude) |> 
+  add_model(rf_model)
+
+rf_fit <- rf_wflow |> fit(data = ames_train)
+```
+Setting up a random forest model using the ranger engine.
+
+```{r}
+#| label: rf-vs-lm-function
+
+estimate_perf <- function(model, dat) {
+  # Capture the names of the `model` and `dat` objects
+  cl <- match.call()
+  obj_name <- as.character(cl$model)
+  data_name <- as.character(cl$dat)
+  data_name <- gsub("ames_", "", data_name)
+  
+  # Estimate these metrics:
+  reg_metrics <- metric_set(rmse, rsq)
+  
+  model %>%
+    predict(dat) %>%
+    bind_cols(dat %>% select(Sale_Price)) %>%
+    reg_metrics(Sale_Price, .pred) %>%
+    select(-.estimator) %>%
+    mutate(object = obj_name, data = data_name)
+}
+```
+
+```{r}
+#| label: rf-vs-lm-compare
+
+estimate_perf(rf_fit, ames_train)
+estimate_perf(lm_fit, ames_train)
+
+estimate_perf(rf_fit, ames_test)
+```
+
+RFs are low bias models that can overfit easily. Reusing the training data is called resubstitution and leads to overly optimistic performance estimates. Need to use resampling to properly evaluate performance.
+
+```{r}
+#| label: v-fold
+
+set.seed(1001)
+ames_folds <- vfold_cv(ames_train, v = 10)
+ames_folds
+
+ames_folds$splits[[1]] %>% analysis() %>% dim()
+```
