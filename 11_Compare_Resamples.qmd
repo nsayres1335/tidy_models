@@ -18,37 +18,49 @@ ames <- mutate(ames, Sale_Price = log10(Sale_Price))
 set.seed(502)
 ames_split <- initial_split(ames, prop = 0.80, strata = Sale_Price)
 ames_train <- training(ames_split)
-ames_test  <-  testing(ames_split)
+ames_test <- testing(ames_split)
 
-ames_rec <- 
-  recipe(Sale_Price ~ Neighborhood + Gr_Liv_Area + Year_Built + Bldg_Type + 
-           Latitude + Longitude, data = ames_train) %>%
-  step_log(Gr_Liv_Area, base = 10) %>% 
-  step_other(Neighborhood, threshold = 0.01) %>% 
-  step_dummy(all_nominal_predictors()) %>% 
-  step_interact( ~ Gr_Liv_Area:starts_with("Bldg_Type_") ) %>% 
+ames_rec <-
+  recipe(
+    Sale_Price ~ Neighborhood +
+      Gr_Liv_Area +
+      Year_Built +
+      Bldg_Type +
+      Latitude +
+      Longitude,
+    data = ames_train
+  ) %>%
+  step_log(Gr_Liv_Area, base = 10) %>%
+  step_other(Neighborhood, threshold = 0.01) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_interact(~ Gr_Liv_Area:starts_with("Bldg_Type_")) %>%
   step_ns(Latitude, Longitude, deg_free = 20)
 
 lm_model <- linear_reg() %>% set_engine("lm")
 
-lm_wflow <- 
-  workflow() %>% 
-  add_model(lm_model) %>% 
+lm_wflow <-
+  workflow() %>%
+  add_model(lm_model) %>%
   add_recipe(ames_rec)
 
 lm_fit <- fit(lm_wflow, ames_train)
 
-rf_model <- 
-  rand_forest(trees = 1000) %>% 
-  set_engine("ranger") %>% 
+rf_model <-
+  rand_forest(trees = 1000) %>%
+  set_engine("ranger") %>%
   set_mode("regression")
 
-rf_wflow <- 
-  workflow() %>% 
+rf_wflow <-
+  workflow() %>%
   add_formula(
-    Sale_Price ~ Neighborhood + Gr_Liv_Area + Year_Built + Bldg_Type + 
-      Latitude + Longitude) %>% 
-  add_model(rf_model) 
+    Sale_Price ~ Neighborhood +
+      Gr_Liv_Area +
+      Year_Built +
+      Bldg_Type +
+      Latitude +
+      Longitude
+  ) %>%
+  add_model(rf_model)
 
 set.seed(1001)
 ames_folds <- vfold_cv(ames_train, v = 10)
@@ -56,8 +68,267 @@ ames_folds <- vfold_cv(ames_train, v = 10)
 keep_pred <- control_resamples(save_pred = TRUE, save_workflow = TRUE)
 
 set.seed(1003)
-rf_res <- rf_wflow %>% fit_resamples(resamples = ames_folds, control = keep_pred)
+rf_res <- rf_wflow %>%
+  fit_resamples(resamples = ames_folds, control = keep_pred)
 ```
 
 ## 11. Comparing Models w/ Resampling
 
+```{r}
+#| label: multiple-models
+
+basic_rec <-
+  recipe(
+    Sale_Price ~ Neighborhood +
+      Gr_Liv_Area +
+      Year_Built +
+      Bldg_Type +
+      Latitude +
+      Longitude,
+    data = ames_train
+  ) %>%
+  step_log(Gr_Liv_Area, base = 10) %>%
+  step_other(Neighborhood, threshold = 0.01) %>%
+  step_dummy(all_nominal_predictors())
+
+interaction_rec <-
+  basic_rec %>%
+  step_interact(~ Gr_Liv_Area:starts_with("Bldg_Type_"))
+
+spline_rec <-
+  interaction_rec %>%
+  step_ns(Latitude, Longitude, deg_free = 50)
+
+preproc <-
+  list(basic = basic_rec, interact = interaction_rec, splines = spline_rec)
+
+lm_models <- workflow_set(preproc, list(lm = linear_reg()), cross = FALSE)
+lm_models
+```
+
+Builds a basic recipe and two extended versions (with interactions and with splines), then creates a workflow set from preproc recipes and model objects.
+
+```{r}
+#| label: workflow-map
+
+lm_models <-
+  lm_models %>%
+  workflow_map(
+    "fit_resamples",
+    # Options to `workflow_map()`:
+    seed = 1101,
+    verbose = TRUE,
+    # Options to `fit_resamples()`:
+    resamples = ames_folds,
+    control = keep_pred
+  )
+
+lm_models
+```
+
+Using **workflow_map()** to iterate over each workflow obj (prepoc recipe/formula + model), **fit_resamples()** fits the resample data (10-fold CV of the training data) to each model.
+
+```{r}
+#| label: collect-metrics
+
+collect_metrics(lm_models) %>%
+  filter(.metric == "rmse")
+```
+
+Collects the performance metrics (RMSE) for each model in the workflow set. The splines + interactions workflow object has the lowest RMSE, indicating the best performance.
+
+```{r}
+#| label: adding-rf
+
+four_models <-
+  as_workflow_set(random_forest = rf_res) %>%
+  bind_rows(lm_models)
+
+four_models
+```
+
+Turning the RF result into a workflow set and binding it to the lm models workflow set.
+
+```{r}
+#| label: autoplot
+
+# install.packages("ggrepel")
+
+library(ggrepel)
+
+autoplot(four_models, metric = "rsq") +
+  geom_text_repel(aes(label = wflow_id), nudge_x = 1 / 8, nudge_y = 1 / 100) +
+  theme(legend.position = "none")
+```
+
+**autoplot()** shows CIs for each model in order of best to worst. Looking at coefficient of determination (R²) here. The RF model is the best, followed by the lm model with splines and interactions.
+
+```{r}
+#| label: btwn-model-rsq
+
+# install.packages("corrr")
+
+rsq_indiv_estimates <-
+  collect_metrics(four_models, summarize = FALSE) %>%
+  filter(.metric == "rsq")
+
+rsq_wider <-
+  rsq_indiv_estimates %>%
+  select(wflow_id, .estimate, id) %>%
+  pivot_wider(
+    id_cols = "id",
+    names_from = "wflow_id",
+    values_from = ".estimate"
+  )
+
+corrr::correlate(rsq_wider %>% select(-id), quiet = TRUE)
+```
+
+Collect metrics and filter to rsq. Then pivot to wider format with each model as a column. Finally, compute correlations between the models' R² estimates across resamples. High correlations indicate large within-resample correlations.
+
+```{r}
+#| label: fig-rsq
+
+rsq_indiv_estimates %>%
+  mutate(wflow_id = reorder(wflow_id, .estimate)) %>%
+  ggplot(aes(x = wflow_id, y = .estimate, group = id, color = id)) +
+  geom_line(alpha = .5, linewidth = 1.25) +
+  theme(legend.position = "none")
+```
+
+If the resample-to-resample effect was not real, there would not be any parallel lines.
+
+```{r}
+#| label: cor-test
+
+rsq_wider %>%
+  with(cor.test(basic_lm, splines_lm)) %>%
+  tidy() %>%
+  select(estimate, starts_with("conf"))
+```
+
+Results of the correlation test show us that the wihin-resample correlation between the basic lm and spline lm models is statistically significant. If there is a significant +cov, then any stat test of this dif would be critically under-powered comparing the difference of the 2 models. In other words, ignoring resample-to-resample effect would bias our model comparisons towards finding no differences.
+
+```{r}
+#| label: diff-test
+
+compare_lm <-
+  rsq_wider %>%
+  mutate(difference = splines_lm - basic_lm)
+
+lm(difference ~ 1, data = compare_lm) %>%
+  tidy(conf.int = TRUE) %>%
+  select(estimate, p.value, starts_with("conf"))
+
+# Alternatively, a paired t-test could also be used:
+rsq_wider %>%
+  with(t.test(splines_lm, basic_lm, paired = TRUE)) %>%
+  tidy() %>%
+  select(estimate, p.value, starts_with("conf"))
+```
+
+ANOVA of differences (ANOVA is a linear model) and a paired t-test are identical ways of testing the difference in R²'s between the spline lm and basic lm models, while properly accounting for the within-resample correlation (i.e., negating it). The p-value indicates that the R²'s of the models are significantly different, but the effect size is small (0.91%), which may be under our practical effect size (e.g., 2%). In other words, splines and interactions do improve the model, but not by much. May exclude for parismony's sake.
+
+```{r}
+#| label: bayes-diff
+
+# install.packages("tidyposterior")
+# install.packages("rstanarm")
+
+library(tidyposterior)
+library(rstanarm)
+
+rsq_anova <-
+  perf_mod(
+    four_models,
+    metric = "rsq",
+    prior_intercept = rstanarm::student_t(df = 1),
+    chains = 4,
+    iter = 5000,
+    seed = 1102
+  )
+```
+
+Bayesian ANOVA. See [Statisical Rethinking (McElreath, 2020)](https://www.routledge.com/Statistical-Rethinking-A-Bayesian-Course-with-Examples-in-R-and-STAN/McElreath/p/book/9780367139919) for more on Bayesian approaches in R.
+
+```{r}
+#| label: bayes-post
+
+model_post <-
+  rsq_anova %>%
+  # Take a random sample from the posterior distribution
+  # so set the seed again to be reproducible.
+  tidy(seed = 1103)
+
+glimpse(model_post)
+```
+
+```{r}
+#| label: bayes-plot
+
+model_post %>%
+  mutate(model = forcats::fct_inorder(model)) %>%
+  ggplot(aes(x = posterior)) +
+  geom_histogram(bins = 50, color = "white", fill = "blue", alpha = 0.4) +
+  facet_wrap(~model, ncol = 1)
+```
+
+Histograms describe the estimated prob dists of the mean R² for each model. The linear models have significant overlap.
+
+```{r}
+#| label: bayes-autoplot
+
+autoplot(rsq_anova) +
+  geom_text_repel(aes(label = workflow), nudge_x = 1 / 8, nudge_y = 1 / 100) +
+  theme(legend.position = "none")
+```
+
+Intervals instead of histograms for each model's R² posterior distribution.
+
+```{r}
+#| label: bayes-diff
+
+rqs_diff <-
+  contrast_models(
+    rsq_anova,
+    list_1 = "splines_lm",
+    list_2 = "basic_lm",
+    seed = 1104
+  )
+
+rqs_diff %>%
+  as_tibble() %>%
+  ggplot(aes(x = difference)) +
+  geom_vline(xintercept = 0, lty = 2) +
+  geom_histogram(bins = 50, color = "white", fill = "red", alpha = 0.4)
+```
+
+Histogram of the posterior distribution of the difference in R² between the spline lm and basic lm models. The distribution is mostly greater than 0, indicating that the models are significantly different.
+
+```{r}
+#| label: bayes-summary
+
+summary(rqs_diff) %>%
+  select(-starts_with("pract"))
+```
+
+Use **summary()** to return credible intervals (analogous to CIs). The probability reflects the proportion of the posterior that is greater than zero. 1.0 is far from 0.0, indicating statistical significance. The estimate of the mean dif is close to 0, though, indicating a small effect size.
+
+```{r}
+#| label: Bayes-effect-size
+
+summary(rqs_diff, size = 0.02) %>%
+  select(contrast, starts_with("pract"))
+```
+
+Using a ROPE estimate (Region of Practical Equivalence) to determine practical significance. Here, a ROPE of 0.02 (2%) is used. The proportion of the posterior within the ROPE is 1, indicating that most of the distribution is within the ROPE. 1 is large indicating the models are practically equivalent.
+
+```{r}
+#| label: prac-eq-plot
+
+autoplot(rsq_anova, type = "ROPE", size = 0.02) +
+  geom_text_repel(aes(label = workflow)) +
+  theme(legend.position = "none")
+```
+
+Plot showing the ROPE for each model's R² posterior distribution. The RF model is statistically and practically better than the lm models with a 2% practical effect size.

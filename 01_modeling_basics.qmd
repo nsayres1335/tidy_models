@@ -531,7 +531,8 @@ The **tidy()** method can be called along w/ *id* to get results of **step_other
 ## 9. Judging Model Effectiveness
 
 ```{r}
-#| label:
+#| label: test-predictions
+
 ames_test_res <- predict(lm_fit, new_data = ames_test %>% select(-Sale_Price))
 
 ames_test_res <- bind_cols(ames_test_res, ames_test |> select(Sale_Price))
