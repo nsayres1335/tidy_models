@@ -1,0 +1,209 @@
+---
+title: "12. Model Tunning and the Dangers of Overfitting"
+format: html
+date: last-modified
+execute:
+    cache: true
+code-fold: true
+toc: true
+---
+
+```{r}
+#| label: code
+
+library(tidymodels)
+data(ames)
+ames <- mutate(ames, Sale_Price = log10(Sale_Price))
+
+set.seed(502)
+ames_split <- initial_split(ames, prop = 0.80, strata = Sale_Price)
+ames_train <- training(ames_split)
+ames_test <- testing(ames_split)
+
+ames_rec <-
+  recipe(
+    Sale_Price ~ Neighborhood +
+      Gr_Liv_Area +
+      Year_Built +
+      Bldg_Type +
+      Latitude +
+      Longitude,
+    data = ames_train
+  ) %>%
+  step_log(Gr_Liv_Area, base = 10) %>%
+  step_other(Neighborhood, threshold = 0.01) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_interact(~ Gr_Liv_Area:starts_with("Bldg_Type_")) %>%
+  step_ns(Latitude, Longitude, deg_free = 20)
+
+lm_model <- linear_reg() %>% set_engine("lm")
+
+lm_wflow <-
+  workflow() %>%
+  add_model(lm_model) %>%
+  add_recipe(ames_rec)
+
+lm_fit <- fit(lm_wflow, ames_train)
+
+rf_model <-
+  rand_forest(trees = 1000) %>%
+  set_engine("ranger") %>%
+  set_mode("regression")
+
+rf_wflow <-
+  workflow() %>%
+  add_formula(
+    Sale_Price ~ Neighborhood +
+      Gr_Liv_Area +
+      Year_Built +
+      Bldg_Type +
+      Latitude +
+      Longitude
+  ) %>%
+  add_model(rf_model)
+
+set.seed(1001)
+ames_folds <- vfold_cv(ames_train, v = 10)
+
+keep_pred <- control_resamples(save_pred = TRUE, save_workflow = TRUE)
+
+set.seed(1003)
+rf_res <- rf_wflow %>%
+  fit_resamples(resamples = ames_folds, control = keep_pred)
+```
+
+## 12. Model Tuning and the Dangers of Overfitting
+
+
+```{r}
+#| label: optimize-link-function
+#| eval: false
+
+llhood <- function(...) {
+  logistic_reg() %>%
+    set_engine("glm", ...) %>%
+    fit(Class ~ ., data = training_set) %>%
+    glance() %>%
+    select(logLik)
+}
+
+bind_rows(
+  llhood(),
+  llhood(family = binomial(link = "probit")),
+  llhood(family = binomial(link = "cloglog"))
+) %>%
+  mutate(link = c("logit", "probit", "c-log-log")) %>%
+  arrange(desc(logLik))
+
+#> # A tibble: 3 × 2
+#>   logLik link
+#>    <dbl> <chr>
+#> 1  -258. logit
+#> 2  -262. probit
+#> 3  -270. c-log-log
+```
+
+Scale of values makes it difficult to know if these differences are important. Can improve my resampling.
+
+```{r}
+#| label: optimize-link-function-resample
+#| eval: false
+
+set.seed(1201)
+rs <- vfold_cv(training_set, repeats = 10)
+
+# Return the individual resampled performance estimates:
+lloss <- function(...) {
+  perf_meas <- metric_set(roc_auc, mn_log_loss)
+
+  logistic_reg() %>%
+    set_engine("glm", ...) %>%
+    fit_resamples(Class ~ A + B, rs, metrics = perf_meas) %>%
+    collect_metrics(summarize = FALSE) %>%
+    select(id, id2, .metric, .estimate)
+}
+
+resampled_res <-
+  bind_rows(
+    lloss() %>% mutate(model = "logistic"),
+    lloss(family = binomial(link = "probit")) %>% mutate(model = "probit"),
+    lloss(family = binomial(link = "cloglog")) %>% mutate(model = "c-log-log")
+  ) %>%
+  # Convert log-loss to log-likelihood:
+  mutate(
+    .estimate = ifelse(.metric == "mn_log_loss", -.estimate, .estimate)
+  ) %>%
+  group_by(model, .metric) %>%
+  summarize(
+    mean = mean(.estimate, na.rm = TRUE),
+    std_err = sd(.estimate, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )
+
+resampled_res %>%
+  filter(.metric == "mn_log_loss") %>%
+  ggplot(aes(x = mean, y = model)) +
+  geom_point() +
+  geom_errorbar(
+    aes(xmin = mean - 1.64 * std_err, xmax = mean + 1.64 * std_err),
+    width = .1
+  ) +
+  labs(y = NULL, x = "log-likelihood")
+```
+
+```{r}
+#| label: tuning
+
+ames_rec <-
+  recipe(
+    Sale_Price ~ Neighborhood +
+      Gr_Liv_Area +
+      Year_Built +
+      Bldg_Type +
+      Latitude +
+      Longitude,
+    data = ames_train
+  ) %>%
+  step_log(Gr_Liv_Area, base = 10) %>%
+  step_other(Neighborhood, threshold = tune()) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_interact(~ Gr_Liv_Area:starts_with("Bldg_Type_")) %>%
+  step_ns(Longitude, deg_free = tune("longitude df")) %>%
+  step_ns(Latitude, deg_free = tune("latitude df"))
+
+recipes_param <- extract_parameter_set_dials(ames_rec)
+recipes_param
+```
+
+Can call a step more than once to optimize different preds differently. E.g., **step_ns()**  is called twice to tune lat and long to different levels of smoothness. **tune()** can take a name argument to distinguish between multiple calls of the same step. 
+
+```{r}
+#| label: tuning-nondefaulting-params
+
+rf_spec <-
+  rand_forest(mtry = tune()) %>%
+  set_engine("ranger", regularization.factor = tune("regularization")) %>%
+  set_mode("regression")
+
+rf_param <- extract_parameter_set_dials(rf_spec)
+
+pca_rec <-
+  recipe(Sale_Price ~ ., data = ames_train) %>%
+  # Select the square-footage predictors and extract their PCA components:
+  step_normalize(contains("SF")) %>%
+  # Select the number of components needed to capture 95% of
+  # the variance in the predictors.
+  step_pca(contains("SF"), threshold = .95)
+
+updated_param <-
+  workflow() %>%
+  add_model(rf_spec) %>%
+  add_recipe(pca_rec) %>%
+  extract_parameter_set_dials() %>%
+  finalize(ames_train)
+updated_param
+
+updated_param %>% extract_parameter_dials("mtry")
+```
+
+Use **finalize()** to tune params whose ranges can change during the workflow, like when using PCA to create new preds.
