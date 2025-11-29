@@ -74,7 +74,6 @@ rf_res <- rf_wflow %>%
 
 ## 12. Model Tuning and the Dangers of Overfitting
 
-
 ```{r}
 #| label: optimize-link-function
 #| eval: false
