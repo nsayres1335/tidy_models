@@ -111,3 +111,179 @@ crossing(
 )
 ```
 
+**dials** package has *grid_()* functions.
+
+```{r}
+#| label: grid-regular
+
+# same levels for all parameters
+grid_regular(mlp_param, levels = 2)
+
+# custom levels for each parameter
+mlp_param %>% 
+  grid_regular(levels = c(hidden_units = 3, penalty = 2, epochs = 2))
+```
+
+Fractional factorial designs (see Box, Hunter, and Hunter 2005) can be used to skip some values.
+
+Can generate grids irregularly spaced values using `grid_random()`. 
+
+```{r}
+#| label: grid-random
+
+set.seed(1301)
+mlp_param %>% 
+  grid_random(size = 1000) %>% # 'size' is the number of combinations
+  summary()
+```
+
+Random can result in a lot of overlap, especially for small-to-medium sized grids. 
+
+```{r}
+#| label: random-design
+
+library(ggforce)
+
+set.seed(1302)
+mlp_param %>% 
+  # The 'original = FALSE' option keeps penalty in log10 units
+  grid_random(size = 20, original = FALSE) %>% 
+  ggplot(aes(x = .panel_x, y = .panel_y)) + 
+  geom_point() +
+  geom_blank() +
+  facet_matrix(vars(hidden_units, penalty, epochs), layer.diag = 2) + 
+  labs(title = "Random design with 20 candidates")
+```
+
+Better to use a space-filling design such as Latin hypercube sampling (McKay, Beckman, Conover 1979), maximum entropy (Shewry and Wynn 1987), or maximum projection (Joseph, Gul, and Ba 2015). 
+
+```{r}
+#| label: latin-hypercube
+
+set.seed(1303)
+mlp_param %>% 
+  grid_space_filling(size = 20, original = FALSE) %>% 
+  ggplot(aes(x = .panel_x, y = .panel_y)) + 
+  geom_point() +
+  geom_blank() +
+  facet_matrix(vars(hidden_units, penalty, epochs), layer.diag = 2) + 
+  labs(title = "Latin Hypercube design with 20 candidates")
+```
+
+### Example Evaluation
+
+```{r}
+#| label: load-data
+
+data(cells)
+cells <- cells %>% select(-case)
+```
+
+```{r}
+#| label: vfold_cv
+
+set.seed(1304)
+cell_folds <- vfold_cv(cells)
+```
+
+Predictors have a high degree of correlation, so use PCA to reduce dimensionality. Number of PCA components can be tuned. Lower-rank components have a wider range than the higher-rank compenents; normalization is needed. PCA is variance based and particularly susceptible to extreme values; a Yeo-Johnson transformation can be used to encourage more symmetric distributions. 
+
+```{r}
+#| label: recipe-workflow
+
+mlp_rec <-
+  recipe(class ~ ., data = cells) %>%
+  step_YeoJohnson(all_numeric_predictors()) %>% 
+  step_normalize(all_numeric_predictors()) %>% 
+  step_pca(all_numeric_predictors(), num_comp = tune()) %>% 
+  step_normalize(all_numeric_predictors())
+
+mlp_wflow <- 
+  workflow() %>% 
+  add_model(mlp_spec) %>% 
+  add_recipe(mlp_rec)
+
+mlp_param <- 
+  mlp_wflow %>% 
+  extract_parameter_set_dials() %>% 
+  # epochs default too wide [10, 1000] and num_comp default too narrow [1, 4]
+  update(
+    epochs = epochs(c(50, 200)),
+    # "0" components means no PCA transformation; used to compare with/without PCA
+    num_comp = num_comp(c(0, 40))
+  )
+```
+
+Tuning with grid search at 3 levels for each parameter (3 x 3 x 3 x 3 = 81 total combinations). Using ROC AUC on the 10-fold CV resample set to evaluate tune.
+
+```{r}
+#| label: tune-grid
+
+roc_res <- metric_set(roc_auc)
+
+set.seed(1305)
+mlp_reg_tune <-
+  mlp_wflow %>%
+  tune_grid(
+    cell_folds,
+    grid = mlp_param %>% grid_regular(levels = 3),
+    metrics = roc_res
+  )
+
+mlp_reg_tune
+```
+
+Using high-level convenience functions to understand the results.
+
+```{r}
+#| label: understanding-results
+
+autoplot(mlp_reg_tune) + 
+  scale_color_viridis_d(direction = -1) + 
+  theme(legend.position = "top")
+```
+
+Amount of penalization has the largest impact on ROC AUC. Epochs doesn't matter the match. Number of hidden units matters most when regularization is low (often harming performance). 
+
+Can use *show_best()* to see the top results. Several param combos give similar results.
+
+```{r}
+#| label: show-best
+
+show_best(mlp_reg_tune) %>% select(-.estimator)
+```
+
+Results indicate that another grid search using a larger weight decay penalty range should be explored. Can use a space-filling design (sfd) this time.
+
+```{r}
+#| label: space-filling-grid-search
+
+set.seed(1306)
+mlp_sfd_tune <-
+  mlp_wflow %>%
+  tune_grid(
+    cell_folds,
+    grid = 20,
+    # Pass in the parameter object to use the appropriate range: 
+    param_info = mlp_param,
+    metrics = roc_res
+  )
+
+mlp_sfd_tune
+```
+
+Can still use *autoplot()* to visualize results, but works differently since the grid is not regular. Generates a marginal effects plot.
+
+```{r}
+#| label: autoplot-sfd
+
+autoplot(mlp_sfd_tune)
+
+show_best(mlp_sfd_tune) %>% select(-.estimator)
+```
+
+Smaller weight decay seems better, which is the opposite result from regular grid search. Each point in each panel is shared with the otehr 3 tuning params, i.e., the trends in one panel can be affected by te others. In regular grid search, each point in each panel is equally averaged over the other params, better isolating the trends. 
+
+Often makes sense to choose a slightly suboptimal param combo if it's a simler model. In this case, larger penalty values and/or fewer hidden units.
+
+Can use *extract* arg in *control_grid()* to retain fitted models and/or recipes, but usually no point. Similarly, can use *save_pred* arg in *collect_predictions()* to save predictions for each resample.
