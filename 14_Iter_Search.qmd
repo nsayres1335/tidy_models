@@ -23,3 +23,47 @@ roc_res <- metric_set(roc_auc)
 ```
 
 ## 14.1 A Support Vector Machine Model
+
+SVMs can provide a nice 2d viz of search process. Here we set up a SVM model with two hyperparameters to tune: `cost` and `rbf_sigma`. 
+
+```{r}
+library(tidymodels)
+tidymodels_prefer()
+
+svm_rec <-
+  recipe(class ~ ., data = cells) %>%
+  step_YeoJohnson(all_numeric_predictors()) %>%
+  step_normalize(all_numeric_predictors())
+
+svm_spec <-
+  svm_rbf(cost = tune(), rbf_sigma = tune()) %>%
+  set_engine("kernlab") %>%
+  set_mode("classification")
+
+svm_wflow <-
+  workflow() %>%
+  add_model(svm_spec) %>%
+  add_recipe(svm_rec)
+```
+
+Checking defaults on tuning params. 
+
+```{r}
+#| label: tuning-params-defaults
+
+cost()
+
+rbf_sigma()
+```
+
+```{r}
+#| label: updating-kernel
+
+svm_param <-
+  svm_wflow %>%
+  extract_parameter_set_dials() %>%
+  update(rbf_sigma = rbf_sigma(c(-7, -1)))
+```
+
+## 14.2. Bayesian Optimization
+
