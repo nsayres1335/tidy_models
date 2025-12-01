@@ -12,76 +12,19 @@ toc: true
 #| label: code
 
 library(tidymodels)
-data(ames)
-ames <- mutate(ames, Sale_Price = log10(Sale_Price))
 
-set.seed(502)
-ames_split <- initial_split(ames, prop = 0.80, strata = Sale_Price)
-ames_train <- training(ames_split)
-ames_test <- testing(ames_split)
-
-ames_rec <-
-  recipe(
-    Sale_Price ~ Neighborhood +
-      Gr_Liv_Area +
-      Year_Built +
-      Bldg_Type +
-      Latitude +
-      Longitude,
-    data = ames_train
-  ) %>%
-  step_log(Gr_Liv_Area, base = 10) %>%
-  step_other(Neighborhood, threshold = 0.01) %>%
-  step_dummy(all_nominal_predictors()) %>%
-  step_interact(~ Gr_Liv_Area:starts_with("Bldg_Type_")) %>%
-  step_ns(Latitude, Longitude, deg_free = 20)
-
-lm_model <- linear_reg() %>% set_engine("lm")
-
-lm_wflow <-
-  workflow() %>%
-  add_model(lm_model) %>%
-  add_recipe(ames_rec)
-
-lm_fit <- fit(lm_wflow, ames_train)
-
-rf_model <-
-  rand_forest(trees = 1000) %>%
-  set_engine("ranger") %>%
-  set_mode("regression")
-
-rf_wflow <-
-  workflow() %>%
-  add_formula(
-    Sale_Price ~ Neighborhood +
-      Gr_Liv_Area +
-      Year_Built +
-      Bldg_Type +
-      Latitude +
-      Longitude
-  ) %>%
-  add_model(rf_model)
-
-set.seed(1001)
-ames_folds <- vfold_cv(ames_train, v = 10)
-
-keep_pred <- control_resamples(save_pred = TRUE, save_workflow = TRUE)
-
-set.seed(1003)
-rf_res <- rf_wflow %>%
-  fit_resamples(resamples = ames_folds, control = keep_pred)
 ```
 
-## 13. Grid Search
+## 13.1. Regular and Non-Regular Grids
 
 Using a multi-layer perceptron (MLP) model (AKA single layer artificial NN) as an example, this section demonstrates how to set up a grid search for hyperparameter tuning using the `tidymodels` framework in R.
 
 ```{r}
 #| label: setup
 
-mlp_spec <- 
-  mlp(hidden_units = tune(), penalty = tune(), epochs = tune()) %>% 
-  set_engine("nnet", trace = 0) %>% 
+mlp_spec <-
+  mlp(hidden_units = tune(), penalty = tune(), epochs = tune()) %>%
+  set_engine("nnet", trace = 0) %>%
   set_mode("classification")
 ```
 
@@ -120,7 +63,7 @@ crossing(
 grid_regular(mlp_param, levels = 2)
 
 # custom levels for each parameter
-mlp_param %>% 
+mlp_param %>%
   grid_regular(levels = c(hidden_units = 3, penalty = 2, epochs = 2))
 ```
 
@@ -132,7 +75,7 @@ Can generate grids irregularly spaced values using `grid_random()`.
 #| label: grid-random
 
 set.seed(1301)
-mlp_param %>% 
+mlp_param %>%
   grid_random(size = 1000) %>% # 'size' is the number of combinations
   summary()
 ```
@@ -145,13 +88,13 @@ Random can result in a lot of overlap, especially for small-to-medium sized grid
 library(ggforce)
 
 set.seed(1302)
-mlp_param %>% 
+mlp_param %>%
   # The 'original = FALSE' option keeps penalty in log10 units
-  grid_random(size = 20, original = FALSE) %>% 
-  ggplot(aes(x = .panel_x, y = .panel_y)) + 
+  grid_random(size = 20, original = FALSE) %>%
+  ggplot(aes(x = .panel_x, y = .panel_y)) +
   geom_point() +
   geom_blank() +
-  facet_matrix(vars(hidden_units, penalty, epochs), layer.diag = 2) + 
+  facet_matrix(vars(hidden_units, penalty, epochs), layer.diag = 2) +
   labs(title = "Random design with 20 candidates")
 ```
 
@@ -161,16 +104,16 @@ Better to use a space-filling design such as Latin hypercube sampling (McKay, Be
 #| label: latin-hypercube
 
 set.seed(1303)
-mlp_param %>% 
-  grid_space_filling(size = 20, original = FALSE) %>% 
-  ggplot(aes(x = .panel_x, y = .panel_y)) + 
+mlp_param %>%
+  grid_space_filling(size = 20, original = FALSE) %>%
+  ggplot(aes(x = .panel_x, y = .panel_y)) +
   geom_point() +
   geom_blank() +
-  facet_matrix(vars(hidden_units, penalty, epochs), layer.diag = 2) + 
+  facet_matrix(vars(hidden_units, penalty, epochs), layer.diag = 2) +
   labs(title = "Latin Hypercube design with 20 candidates")
 ```
 
-### Example Evaluation
+### 13.2. Evaluating the Grid
 
 ```{r}
 #| label: load-data
@@ -193,19 +136,19 @@ Predictors have a high degree of correlation, so use PCA to reduce dimensionalit
 
 mlp_rec <-
   recipe(class ~ ., data = cells) %>%
-  step_YeoJohnson(all_numeric_predictors()) %>% 
-  step_normalize(all_numeric_predictors()) %>% 
-  step_pca(all_numeric_predictors(), num_comp = tune()) %>% 
+  step_YeoJohnson(all_numeric_predictors()) %>%
+  step_normalize(all_numeric_predictors()) %>%
+  step_pca(all_numeric_predictors(), num_comp = tune()) %>%
   step_normalize(all_numeric_predictors())
 
-mlp_wflow <- 
-  workflow() %>% 
-  add_model(mlp_spec) %>% 
+mlp_wflow <-
+  workflow() %>%
+  add_model(mlp_spec) %>%
   add_recipe(mlp_rec)
 
-mlp_param <- 
-  mlp_wflow %>% 
-  extract_parameter_set_dials() %>% 
+mlp_param <-
+  mlp_wflow %>%
+  extract_parameter_set_dials() %>%
   # epochs default too wide [10, 1000] and num_comp default too narrow [1, 4]
   update(
     epochs = epochs(c(50, 200)),
@@ -238,8 +181,8 @@ Using high-level convenience functions to understand the results.
 ```{r}
 #| label: understanding-results
 
-autoplot(mlp_reg_tune) + 
-  scale_color_viridis_d(direction = -1) + 
+autoplot(mlp_reg_tune) +
+  scale_color_viridis_d(direction = -1) +
   theme(legend.position = "top")
 ```
 
@@ -264,7 +207,7 @@ mlp_sfd_tune <-
   tune_grid(
     cell_folds,
     grid = 20,
-    # Pass in the parameter object to use the appropriate range: 
+    # Pass in the parameter object to use the appropriate range:
     param_info = mlp_param,
     metrics = roc_res
   )
@@ -287,3 +230,179 @@ Smaller weight decay seems better, which is the opposite result from regular gri
 Often makes sense to choose a slightly suboptimal param combo if it's a simler model. In this case, larger penalty values and/or fewer hidden units.
 
 Can use *extract* arg in *control_grid()* to retain fitted models and/or recipes, but usually no point. Similarly, can use *save_pred* arg in *collect_predictions()* to save predictions for each resample.
+
+## 13.3 Finalizing the Model
+
+Choosing final params.
+
+```{r}
+#| label: select-best
+
+select_best(mlp_reg_tune, metric = "roc_auc")
+```
+
+Manually picking simpler model with only 1 hidden unit and higher penalty (basically penalized logistic regression).
+
+```{r}
+#| label: finalize-workflow
+
+logistic_param <-
+  tibble(
+    num_comp = 0,
+    epochs = 125,
+    hidden_units = 1,
+    penalty = 1
+  )
+
+final_mlp_wflow <-
+  mlp_wflow %>%
+  finalize_workflow(logistic_param)
+
+final_mlp_wflow
+
+final_mlp_fit <-
+  final_mlp_wflow %>%
+  fit(cells)
+```
+
+## 13.4. Tools for Creating Tuning Specifications
+
+**usemodels** package provides high-level functions for quickly creating and fitting models with tuning specifications. User needs to add resample object and grid search details.
+
+```{r}
+#| label: usemodels-package
+
+library(usemodels)
+
+use_xgboost(
+  Sale_Price ~ Neighborhood +
+    Gr_Liv_Area +
+    Year_Built +
+    Bldg_Type +
+    Latitude +
+    Longitude,
+  data = ames_train,
+  # Add comments explaining some of the code:
+  verbose = TRUE
+)
+```
+
+## Tools for Efficient Grid Search
+
+### 13.5.1. Submodel Optimization
+
+Some types of models can, from a single model fit, eval multiple tuning params without reffiting.
+
+```{r}
+#| label: submodel-optimization-example
+
+c5_spec <-
+  boost_tree(trees = tune()) %>%
+  set_engine("C5.0") %>%
+  set_mode("classification")
+
+set.seed(1307)
+c5_spec %>%
+  tune_grid(
+    class ~ .,
+    resamples = cell_folds,
+    grid = data.frame(trees = 1:100),
+    metrics = roc_res
+  )
+```
+
+Without the submodel optimization, the call to *tune_grid()* used 62.2 minutes to resample 100 submodels. With the optimization, the same call took 100 seconds (a 37-fold speed-up). The reduced time is the difference in *tune_grid()* fitting 1000 models versus 10 models.
+
+### 13.5.2. Parallel Processing
+
+When tuning via grid search, 2 distinct loops: resamples and tune param combos. Can parallelize either or both loops. **tune** package defaults to parallelizing over the resamples only.
+________________
+pseudo-code:
+
+for (rs in resamples) {
+  # Create analysis and assessment sets
+  # Preprocess data (e.g. formula or recipe)
+  for (mod in configurations) {
+    # Fit model {mod} to the {rs} analysis set
+    # Predict the {rs} assessment set
+  }
+}
+_______________
+
+
+Could combine loops over resamples and models into single loop.
+_______________
+pseudo-code:
+
+all_tasks <- crossing(resamples, configurations)
+
+for (iter in all_tasks) {                           
+  # Create analysis and assessment sets for {iter}
+  # Preprocess data (e.g. formula or recipe)
+  # Fit model {iter} to the {iter} analysis set
+  # Predict the {iter} assessment set
+________________
+
+In this case, parallelization now occurs over the single loop. For example, if we use 5-fold cross-validation with M tuning parameter values, the loop is executed over 5×M iterations. This increases the number of potential workers that can be used. However, the work related to data preprocessing is repeated multiple times. If those steps are expensive, this approach will be inefficient.
+
+### 13.5.3. Benchmarking Boosted Trees
+
+### 13.5.4. Access to Global Vars
+
+When using parallel processing, the workers may not have access to all global variables defined in the main R session. Can use "!!" and "!!!" operators from **rlang** package to force evaluation of global variables before sending code to workers.
+
+```{r}
+#| label: global-vars-example
+
+coef_penalty <- 0.1
+
+spec <- linear_reg(penalty = !!coef_penalty) %>% set_engine("glmnet")
+spec$args$penalty
+
+mcmc_args <- list(chains = 3, iter = 1000, cores = 3)
+
+linear_reg() %>% set_engine("stan", !!!mcmc_args)
+```
+
+Recommended when specifying model and recipe.
+
+```{r}
+#| label: global-vars-recipe
+
+library(stringr)
+
+ch_2_vars <- str_subset(names(cells), "ch_2")
+
+# Still uses a reference to global data (~_~;)
+recipe(class ~ ., data = cells) %>%
+  step_spatialsign(all_of(ch_2_vars))
+
+# Inserts the values into the step ヽ(•‿•)ノ
+recipe(class ~ ., data = cells) %>%
+  step_spatialsign(!!!ch_2_vars)
+```
+
+### 13.5.5. Racing Methods
+
+Racing methods attempt to stop evaluating poor-performing tuning parameter combinations early in the resampling process.
+
+```{r}
+#| label: racing-methods
+
+library(finetune)
+
+set.seed(1308)
+mlp_sfd_race <-
+  mlp_wflow %>%
+  tune_race_anova(
+    cell_folds,
+    grid = 20,
+    param_info = mlp_param,
+    metrics = roc_res,
+    control = control_race(verbose_elim = TRUE)
+  )
+
+show_best(mlp_sfd_race, n = 10)
+```
+
+Other interim analysis techniques exists like traditional sequential analysis and Bradley-Terry.
