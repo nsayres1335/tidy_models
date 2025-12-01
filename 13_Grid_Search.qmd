@@ -287,7 +287,7 @@ use_xgboost(
 )
 ```
 
-## Tools for Efficient Grid Search
+## 13.5. Tools for Efficient Grid Search
 
 ### 13.5.1. Submodel Optimization
 
