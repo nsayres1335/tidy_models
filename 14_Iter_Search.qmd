@@ -56,6 +56,8 @@ cost()
 rbf_sigma()
 ```
 
+Updating kernel to improve viz of search space.
+
 ```{r}
 #| label: updating-kernel
 
@@ -65,5 +67,55 @@ svm_param <-
   update(rbf_sigma = rbf_sigma(c(-7, -1)))
 ```
 
+Need to setup a grid for initial results.
+
+```{r}
+#| label: initial-grid
+
+set.seed(1401)
+start_grid <-
+  svm_param %>%
+  update(
+    cost = cost(c(-6, 1)),
+    rbf_sigma = rbf_sigma(c(-6, -4))
+  ) %>%
+  grid_regular(levels = 2)
+
+set.seed(1402)
+svm_initial <-
+  svm_wflow %>%
+  tune_grid(resamples = cell_folds, grid = start_grid, metrics = roc_res)
+
+collect_metrics(svm_initial)
+```
+
 ## 14.2. Bayesian Optimization
+
+Want to use the 1st SVM results as initial substrate in Gaussian process (GP) model. We want to maximize ROC AUC.
+
+```{r}
+#| label: bayes-opt-setup
+
+ctrl <- control_bayes(verbose = TRUE)
+
+set.seed(1403)
+svm_bo <-
+  svm_wflow %>%
+  tune_bayes(
+    resamples = cell_folds,
+    metrics = roc_res,
+    initial = svm_initial,
+    param_info = svm_param,
+    iter = 25,
+    control = ctrl
+  )
+```
+
+```{r}
+#| label: bayes-opt-results
+
+show_best(svm_bo)
+
+autoplot(svm_bo, type = "performance")
+```
 
