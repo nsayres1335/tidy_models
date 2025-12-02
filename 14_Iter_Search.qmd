@@ -119,3 +119,36 @@ show_best(svm_bo)
 autoplot(svm_bo, type = "performance")
 ```
 
+## 14.3. Simulated Annealing
+
+Global search that does a random walk through the parameter space, accepting some worse solutions to escape local optima.
+
+```{r}
+#| label: sim-anneal-setup
+
+library(finetune)
+
+ctrl_sa <- control_sim_anneal(verbose = TRUE, no_improve = 10L)
+
+set.seed(1404)
+svm_sa <-
+  svm_wflow %>%
+  tune_sim_anneal(
+    resamples = cell_folds,
+    metrics = roc_res,
+    initial = svm_initial,
+    param_info = svm_param,
+    iter = 50,
+    control = ctrl_sa
+  )
+```
+
+
+```{r}
+#| label: sim-anneal-results
+
+show_best(svm_sa)
+
+autoplot(svm_sa, type = "performance")
+autoplot(svm_sa, type = "parameters")
+```
