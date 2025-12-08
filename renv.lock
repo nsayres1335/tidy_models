@@ -1199,6 +1199,37 @@
       "Maintainer": "Gábor Csárdi <gabor@posit.co>",
       "Repository": "CRAN"
     },
+    "clipr": {
+      "Package": "clipr",
+      "Version": "0.8.0",
+      "Source": "Repository",
+      "Type": "Package",
+      "Title": "Read and Write from the System Clipboard",
+      "Authors@R": "c( person(\"Matthew\", \"Lincoln\", , \"matthew.d.lincoln@gmail.com\", role = c(\"aut\", \"cre\"), comment = c(ORCID = \"0000-0002-4387-3384\")), person(\"Louis\", \"Maddox\", role = \"ctb\"), person(\"Steve\", \"Simpson\", role = \"ctb\"), person(\"Jennifer\", \"Bryan\", role = \"ctb\") )",
+      "Description": "Simple utility functions to read from and write to the Windows, OS X, and X11 clipboards.",
+      "License": "GPL-3",
+      "URL": "https://github.com/mdlincoln/clipr, http://matthewlincoln.net/clipr/",
+      "BugReports": "https://github.com/mdlincoln/clipr/issues",
+      "Imports": [
+        "utils"
+      ],
+      "Suggests": [
+        "covr",
+        "knitr",
+        "rmarkdown",
+        "rstudioapi (>= 0.5)",
+        "testthat (>= 2.0.0)"
+      ],
+      "VignetteBuilder": "knitr",
+      "Encoding": "UTF-8",
+      "Language": "en-US",
+      "RoxygenNote": "7.1.2",
+      "SystemRequirements": "xclip (https://github.com/astrand/xclip) or xsel (http://www.vergenet.net/~conrad/software/xsel/) for accessing the X11 clipboard, or wl-clipboard (https://github.com/bugaevc/wl-clipboard) for systems using Wayland.",
+      "NeedsCompilation": "no",
+      "Author": "Matthew Lincoln [aut, cre] (<https://orcid.org/0000-0002-4387-3384>), Louis Maddox [ctb], Steve Simpson [ctb], Jennifer Bryan [ctb]",
+      "Maintainer": "Matthew Lincoln <matthew.d.lincoln@gmail.com>",
+      "Repository": "CRAN"
+    },
     "clock": {
       "Package": "clock",
       "Version": "0.7.3",
@@ -2058,6 +2089,62 @@
       "Maintainer": "Frances Lin <franceslinyc@gmail.com>",
       "Repository": "CRAN"
     },
+    "finetune": {
+      "Package": "finetune",
+      "Version": "1.2.1",
+      "Source": "Repository",
+      "Title": "Additional Functions for Model Tuning",
+      "Authors@R": "c( person(\"Max\", \"Kuhn\", , \"max@posit.co\", role = c(\"aut\", \"cre\"), comment = c(ORCID = \"0000-0003-2402-136X\")), person(\"Posit Software, PBC\", role = c(\"cph\", \"fnd\"), comment = c(ROR = \"03wc8by49\")) )",
+      "Description": "The ability to tune models is important. 'finetune' enhances the 'tune' package by providing more specialized methods for finding reasonable values of model tuning parameters.  Two racing methods described by Kuhn (2014) <doi:10.48550/arXiv.1405.6974> are included. An  iterative search method using generalized simulated annealing (Bohachevsky, Johnson and Stein, 1986) <doi:10.1080/00401706.1986.10488128> is also included.",
+      "License": "MIT + file LICENSE",
+      "URL": "https://github.com/tidymodels/finetune, https://finetune.tidymodels.org",
+      "BugReports": "https://github.com/tidymodels/finetune/issues",
+      "Depends": [
+        "R (>= 4.1)",
+        "tune (>= 1.2.0)"
+      ],
+      "Imports": [
+        "cli",
+        "dials (>= 0.3.0)",
+        "dplyr (>= 1.1.1)",
+        "ggplot2",
+        "parsnip (>= 1.1.0)",
+        "purrr (>= 1.0.0)",
+        "rlang",
+        "tibble",
+        "tidyr",
+        "tidyselect",
+        "utils",
+        "vctrs",
+        "workflows (>= 0.2.6)"
+      ],
+      "Suggests": [
+        "BradleyTerry2",
+        "covr",
+        "discrim",
+        "kknn",
+        "klaR",
+        "lme4",
+        "modeldata",
+        "ranger",
+        "recipes (>= 0.2.0)",
+        "rpart",
+        "rsample",
+        "spelling",
+        "testthat",
+        "yardstick"
+      ],
+      "Config/Needs/website": "tidyverse/tidytemplate",
+      "Config/testthat/edition": "3",
+      "Config/usethis/last-upkeep": "2025-05-20",
+      "Encoding": "UTF-8",
+      "Language": "en-US",
+      "RoxygenNote": "7.3.2",
+      "NeedsCompilation": "no",
+      "Author": "Max Kuhn [aut, cre] (ORCID: <https://orcid.org/0000-0003-2402-136X>), Posit Software, PBC [cph, fnd] (ROR: <https://ror.org/03wc8by49>)",
+      "Maintainer": "Max Kuhn <max@posit.co>",
+      "Repository": "CRAN"
+    },
     "fontawesome": {
       "Package": "fontawesome",
       "Version": "0.5.3",
@@ -2598,6 +2685,49 @@
       "NeedsCompilation": "no",
       "Author": "Claus O. Wilke [aut, cre] (ORCID: <https://orcid.org/0000-0002-7470-9261>)",
       "Maintainer": "Claus O. Wilke <wilke@austin.utexas.edu>",
+      "Repository": "CRAN"
+    },
+    "glmnet": {
+      "Package": "glmnet",
+      "Version": "4.1-10",
+      "Source": "Repository",
+      "Type": "Package",
+      "Title": "Lasso and Elastic-Net Regularized Generalized Linear Models",
+      "Date": "2025-07-15",
+      "Authors@R": "c(person(\"Jerome\", \"Friedman\", role=c(\"aut\")), person(\"Trevor\", \"Hastie\", role=c(\"aut\", \"cre\"), email = \"hastie@stanford.edu\"), person(\"Rob\", \"Tibshirani\", role=c(\"aut\")), person(\"Balasubramanian\", \"Narasimhan\", role=c(\"aut\")), person(\"Kenneth\",\"Tay\",role=c(\"aut\")), person(\"Noah\", \"Simon\", role=c(\"aut\")), person(\"Junyang\", \"Qian\", role=c(\"ctb\")), person(\"James\", \"Yang\", role=c(\"aut\")))",
+      "Depends": [
+        "R (>= 3.6.0)",
+        "Matrix (>= 1.0-6)"
+      ],
+      "Imports": [
+        "methods",
+        "utils",
+        "foreach",
+        "shape",
+        "survival",
+        "Rcpp"
+      ],
+      "Suggests": [
+        "knitr",
+        "lars",
+        "testthat",
+        "xfun",
+        "rmarkdown"
+      ],
+      "SystemRequirements": "C++17",
+      "Description": "Extremely efficient procedures for fitting the entire lasso or elastic-net regularization path for linear regression, logistic and multinomial regression models, Poisson regression, Cox model,  multiple-response Gaussian, and the grouped multinomial regression; see <doi:10.18637/jss.v033.i01> and <doi:10.18637/jss.v039.i05>. There are two new and important additions. The family argument can be a GLM family object, which opens the door to any programmed family (<doi:10.18637/jss.v106.i01>). This comes with a modest computational cost, so when the built-in families suffice, they should be used instead.  The other novelty is the relax option, which refits each of the active sets in the path unpenalized. The algorithm uses cyclical coordinate descent in a path-wise fashion, as described in the papers cited.",
+      "License": "GPL-2",
+      "VignetteBuilder": "knitr",
+      "Encoding": "UTF-8",
+      "URL": "https://glmnet.stanford.edu",
+      "RoxygenNote": "7.3.2",
+      "LinkingTo": [
+        "RcppEigen",
+        "Rcpp"
+      ],
+      "NeedsCompilation": "yes",
+      "Author": "Jerome Friedman [aut], Trevor Hastie [aut, cre], Rob Tibshirani [aut], Balasubramanian Narasimhan [aut], Kenneth Tay [aut], Noah Simon [aut], Junyang Qian [ctb], James Yang [aut]",
+      "Maintainer": "Trevor Hastie <hastie@stanford.edu>",
       "Repository": "CRAN"
     },
     "globals": {
@@ -7213,6 +7343,42 @@
       "NeedsCompilation": "yes",
       "Author": "Davis Vaughan [aut, cre], Howard Hinnant [cph] (Author of the included date library), Posit Software, PBC [cph, fnd]",
       "Maintainer": "Davis Vaughan <davis@posit.co>",
+      "Repository": "CRAN"
+    },
+    "usemodels": {
+      "Package": "usemodels",
+      "Version": "0.2.0",
+      "Source": "Repository",
+      "Title": "Boilerplate Code for 'Tidymodels' Analyses",
+      "Authors@R": "c( person(\"Max\", \"Kuhn\", , \"max@rstudio.com\", role = c(\"aut\", \"cre\"), comment = c(ORCID = \"0000-0003-2402-136X\")), person(\"RStudio\", role = \"cph\") )",
+      "Description": "Code snippets to fit models using the tidymodels framework can be easily created for a given data set.",
+      "License": "MIT + file LICENSE",
+      "URL": "https://usemodels.tidymodels.org/, https://github.com/tidymodels/usemodels",
+      "BugReports": "https://github.com/tidymodels/usemodels/issues",
+      "Imports": [
+        "cli",
+        "clipr",
+        "dplyr",
+        "purrr",
+        "recipes (>= 0.1.15)",
+        "rlang",
+        "tidyr",
+        "tune (>= 0.1.2)"
+      ],
+      "Suggests": [
+        "covr",
+        "modeldata",
+        "spelling",
+        "testthat"
+      ],
+      "Config/Needs/website": "tidyverse/tidytemplate",
+      "Config/testthat/edition": "3",
+      "Encoding": "UTF-8",
+      "Language": "en-US",
+      "RoxygenNote": "7.1.2",
+      "NeedsCompilation": "no",
+      "Author": "Max Kuhn [aut, cre] (<https://orcid.org/0000-0003-2402-136X>), RStudio [cph]",
+      "Maintainer": "Max Kuhn <max@rstudio.com>",
       "Repository": "CRAN"
     },
     "utf8": {

@@ -8,3 +8,150 @@ code-fold: true
 toc: true
 ---
 
+## 15.1. Modeling Concrete Mixture Strength
+
+Data from Chap 10 of *Applied Predictive Modeling* (2013) by Kuhn and Johnson. The goal is to predict the compressive strength of concrete based on its ingredients.
+
+*compressive_strength* - outcome variable
+*age* - age (in days) of the concrete sample at testing
+everything else - concrete components in kg/m\^3
+
+
+```{r}
+#| label: load-data
+
+library(tidymodels)
+tidymodels_prefer()
+data(concrete, package = "modeldata")
+glimpse(concrete)
+```
+
+In some cases, the same concrete formula was tested multiple times. Don't want to include replicate mixtures as individual datapoint since they might be distriubted across both the training and test sets - may inflate permorfance metrics. Taking the mean.
+
+```{r}
+#| label: remove-replicates
+
+concrete <-
+  concrete %>%
+  group_by(across(-compressive_strength)) %>%
+  summarize(compressive_strength = mean(compressive_strength), .groups = "drop")
+
+nrow(concrete)
+```
+
+Default 3:1 split w/ 5 repeats of 10-fold CV.
+
+```{r}
+#| label: data-split
+
+set.seed(1501)
+concrete_split <- initial_split(concrete, strata = compressive_strength)
+concrete_train <- training(concrete_split)
+concrete_test <- testing(concrete_split)
+
+set.seed(1502)
+concrete_folds <-
+  vfold_cv(concrete_train, strata = compressive_strength, repeats = 5)
+```
+
+Some models (e.g. NN, KNN, and SVM) require predictors to be centered and scaled. Other models, a traditional response surface design model expansion (i.e., quadratic and 2-way interactions) is a good idea. Creating 2 different recipes.
+
+```{r}
+#| label: create-recipes
+
+normalized_rec <-
+  recipe(compressive_strength ~ ., data = concrete_train) %>%
+  step_normalize(all_predictors())
+
+poly_recipe <-
+  normalized_rec %>%
+  step_poly(all_predictors()) %>%
+  step_interact(~ all_predictors():all_predictors())
+```
+
+Using the **parsnip** addin to create a set of model specifications.
+
+```{r}
+#| label: model-specs
+
+library(rules)
+library(baguette)
+
+linear_reg_spec <-
+  linear_reg(penalty = tune(), mixture = tune()) %>%
+  set_engine("glmnet")
+
+nnet_spec <-
+  mlp(hidden_units = tune(), penalty = tune(), epochs = tune()) %>%
+  set_engine("nnet", MaxNWts = 2600) %>%
+  set_mode("regression")
+
+mars_spec <-
+  mars(prod_degree = tune()) %>% #<- use GCV to choose terms
+  set_engine("earth") %>%
+  set_mode("regression")
+
+svm_r_spec <-
+  svm_rbf(cost = tune(), rbf_sigma = tune()) %>%
+  set_engine("kernlab") %>%
+  set_mode("regression")
+
+svm_p_spec <-
+  svm_poly(cost = tune(), degree = tune()) %>%
+  set_engine("kernlab") %>%
+  set_mode("regression")
+
+knn_spec <-
+  nearest_neighbor(
+    neighbors = tune(),
+    dist_power = tune(),
+    weight_func = tune()
+  ) %>%
+  set_engine("kknn") %>%
+  set_mode("regression")
+
+cart_spec <-
+  decision_tree(cost_complexity = tune(), min_n = tune()) %>%
+  set_engine("rpart") %>%
+  set_mode("regression")
+
+bag_cart_spec <-
+  bag_tree() %>%
+  set_engine("rpart", times = 50L) %>%
+  set_mode("regression")
+
+rf_spec <-
+  rand_forest(mtry = tune(), min_n = tune(), trees = 1000) %>%
+  set_engine("ranger") %>%
+  set_mode("regression")
+
+xgb_spec <-
+  boost_tree(
+    tree_depth = tune(),
+    learn_rate = tune(),
+    loss_reduction = tune(),
+    min_n = tune(),
+    sample_size = tune(),
+    trees = tune()
+  ) %>%
+  set_engine("xgboost") %>%
+  set_mode("regression")
+
+cubist_spec <-
+  cubist_rules(committees = tune(), neighbors = tune()) %>%
+  set_engine("Cubist")
+```
+
+Kuhn and Johnson found that NN's should have up to 27 hidden units in the layer.
+
+```{r}
+#| label: nnet-param
+
+nnet_param <-
+  nnet_spec %>%
+  extract_parameter_set_dials() %>%
+  update(hidden_units = hidden_units(c(1, 27)))
+```
+
+## 15.2. Creating the Workflow Set
+
