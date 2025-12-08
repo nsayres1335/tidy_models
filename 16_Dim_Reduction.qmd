@@ -1,0 +1,373 @@
+---
+title: "16. Dimensionality Reduction"
+format: html
+date: last-modified
+execute:
+    cache: true
+code-fold: true
+toc: true
+---
+
+## 16.2. Beans
+
+The beans data set contains measurements on different varieties of beans. The goal is to classify the variety based on the measurements. There are many variables trying to describe the shape of bean like area, perimenter, compactness, etc. Many of these variables are correlated. This makes the beans data set a good candidate for dimensionality reduction.
+
+Loading data.
+
+```{r}
+#| label: load-data
+
+library(tidymodels)
+tidymodels_prefer()
+library(beans)
+```
+
+Splitting.
+
+```{r}
+#| label: data-split
+
+set.seed(1601)
+bean_split <- initial_validation_split(
+  beans,
+  strata = class,
+  prop = c(0.75, 0.125)
+)
+
+bean_split
+
+bean_train <- training(bean_split)
+bean_test <- testing(bean_split)
+bean_validation <- validation(bean_split)
+
+
+set.seed(1602)
+bean_val <- validation_set(bean_split)
+bean_val$splits[[1]]
+```
+
+Before doing dimensionality reduction, let's look at correlations.
+
+```{r}
+#| label: bean-corrplot
+
+library(corrplot)
+tmwr_cols <- colorRampPalette(c("#91CBD765", "#CA225E"))
+bean_train %>%
+  select(-class) %>%
+  cor() %>%
+  corrplot(col = tmwr_cols(200), tl.col = "black", method = "ellipse")
+```
+
+## 16.3. A Starter Recipe
+
+Skew is bad for variance calculations like PCA. Using **bestNormalize** package to force symmetric distributions.
+
+```{r}
+#| label: bean-recipe
+
+library(bestNormalize)
+
+bean_rec <-
+  # Use the training data from the bean_val split object
+  recipe(class ~ ., data = bean_train) %>%
+  step_zv(all_numeric_predictors()) %>%
+  step_orderNorm(all_numeric_predictors()) %>%
+  step_normalize(all_numeric_predictors())
+```
+
+## 16.4. Recipes in the Wild
+
+*prep()* is similar to *fit()*, but for recipes.
+
+```{r}
+#| label: bean-recipe-train
+
+bean_rec_trained <- prep(bean_rec)
+bean_rec_trained
+```
+
+Can use *verbose* and/or *log_changes* args to help troubleshoot.
+
+```{r}
+#| label: troubleshoot-recipe
+
+bean_rec_trained %>%
+  step_dummy(cornbread) %>% # <- not a real predictor
+  prep(verbose = TRUE)
+
+show_variables <-
+  bean_rec %>%
+  prep(log_changes = TRUE)
+```
+
+Can use *bake()* to apply the recipe to new data.
+
+```{r}
+#| label: bake-recipe
+
+bean_val_processed <- bake(bean_rec_trained, new_data = bean_validation)
+```
+
+Histograms before and after recipe.
+
+```{r}
+#| label: histograms-recipe
+
+library(patchwork)
+p1 <-
+  bean_validation %>%
+  ggplot(aes(x = area)) +
+  geom_histogram(bins = 30, color = "white", fill = "blue", alpha = 1 / 3) +
+  ggtitle("Original validation set data")
+
+p2 <-
+  bean_val_processed %>%
+  ggplot(aes(x = area)) +
+  geom_histogram(bins = 30, color = "white", fill = "red", alpha = 1 / 3) +
+  ggtitle("Processed validation set data")
+
+p1 + p2
+```
+
+## 16.5. Feature Extraction Techniques
+
+```{r}
+#| label: FUNC-plot-validation-results
+
+library(ggforce)
+
+plot_validation_results <- function(recipe, dat = bean_validation) {
+  recipe %>%
+    # Estimate any additional steps
+    prep() %>%
+    # Process the data (the validation set by default)
+    bake(new_data = dat) %>%
+    # Create the scatterplot matrix
+    ggplot(aes(x = .panel_x, y = .panel_y, color = class, fill = class)) +
+    geom_point(alpha = 0.4, size = 0.5) +
+    geom_autodensity(alpha = .3) +
+    facet_matrix(vars(-class), layer.diag = 2) +
+    scale_color_brewer(palette = "Dark2") +
+    scale_fill_brewer(palette = "Dark2")
+}
+```
+
+### 16.5.1. Principal Component Analysis (PCA)
+
+PCA tries to account for as much variance as possible in the first few components.
+
+```{r}
+#| label: pca-beans
+
+bean_rec_trained %>%
+  step_pca(all_numeric_predictors(), num_comp = 4) %>%
+  plot_validation_results() +
+  ggtitle("Principal Component Analysis")
+```
+
+PC1 and PC2 separate the classes pretty well. Might expect the overal problem of classifying bean variety to be relatively easy.
+
+```{r}
+#| label: pca-loadings
+
+library(learntidymodels)
+
+bean_rec_trained %>%
+  step_pca(all_numeric_predictors(), num_comp = 4) %>%
+  prep() %>%
+  plot_top_loadings(component_number <= 4, n = 5) +
+  scale_fill_brewer(palette = "Paired") +
+  ggtitle("Principal Component Analysis")
+```
+
+
+### 16.5.2. Partial Least Squares (PLS)
+
+PLS is a supervised dimensionality reduction technique. It uses the outcome variable to help find components that are good at predicting the outcome.
+
+```{r}
+#| label: pls-beans
+
+bean_rec_trained %>%
+  step_pls(all_numeric_predictors(), outcome = "class", num_comp = 4) %>%
+  plot_validation_results() +
+  ggtitle("Partial Least Squares")
+```
+
+PLS1 and PLS2 are very similar to PCA1 and PCA2.
+
+```{r}
+#| label: pls-loadings
+
+bean_rec_trained %>%
+  step_pls(all_numeric_predictors(), outcome = "class", num_comp = 4) %>%
+  prep() %>%
+  plot_top_loadings(component_number <= 4, n = 5, type = "pls") +
+  scale_fill_brewer(palette = "Paired") +
+  ggtitle("Partial Least Squares")
+```
+
+## 16.5.3. Independent Component Analysis (ICA)
+
+ICA finds components that are statistically independent, instead of uncorrelated like PCA.
+
+```{r}
+#| label: ica-beans
+
+bean_rec_trained %>%
+  step_ica(all_numeric_predictors(), num_comp = 4) %>%
+  plot_validation_results() +
+  ggtitle("Independent Component Analysis")
+```
+
+Not much separation of classes. These independent components do not separate bean types.
+
+### 16.5.4. Uniform Manifold Approximation and Projection (UMAP)
+
+UMAP is a nonlinear dimensionality reduction technique that tries to preserve local structure in the data.
+
+```{r}
+#| label: umap-beans
+
+library(embed)
+
+bean_rec_trained %>%
+  step_umap(all_numeric_predictors(), num_comp = 4) %>%
+  plot_validation_results() +
+  ggtitle("UMAP")
+```
+
+Between-cluster space is pronounced, but there's some heterogeneous mixture of classes.
+
+Also a supervised version of UMAP:
+
+```{r}
+#| label: supervised-umap-beans
+
+bean_rec_trained %>%
+  step_umap(all_numeric_predictors(), outcome = "class", num_comp = 4) %>%
+  plot_validation_results() +
+  ggtitle("UMAP (supervised)")
+```
+
+Looks promising.
+
+UMAP is powerful but very sensitive to tuning params (e.g., number of neighbors, min dist). The defaults may not be optimal.
+
+## 16.6. Modeling
+
+Trying out dimensionality reduction techniques in models.
+
+```{r}
+#| label: modeling-beans
+
+library(baguette)
+library(discrim)
+
+mlp_spec <-
+  mlp(hidden_units = tune(), penalty = tune(), epochs = tune()) %>%
+  set_engine('nnet') %>%
+  set_mode('classification')
+
+bagging_spec <-
+  bag_tree() %>%
+  set_engine('rpart') %>%
+  set_mode('classification')
+
+fda_spec <-
+  discrim_flexible(
+    prod_degree = tune()
+  ) %>%
+  set_engine('earth')
+
+rda_spec <-
+  discrim_regularized(frac_common_cov = tune(), frac_identity = tune()) %>%
+  set_engine('klaR')
+
+bayes_spec <-
+  naive_Bayes() %>%
+  set_engine('klaR')
+```
+
+Needs recipes for the dim reduction techniques we're trying.
+
+```{r}
+#| label: modeling-recipes
+
+bean_rec <-
+  recipe(class ~ ., data = bean_train) %>%
+  step_zv(all_numeric_predictors()) %>%
+  step_orderNorm(all_numeric_predictors()) %>%
+  step_normalize(all_numeric_predictors())
+
+pls_rec <-
+  bean_rec %>%
+  step_pls(all_numeric_predictors(), outcome = "class", num_comp = tune())
+
+umap_rec <-
+  bean_rec %>%
+  step_umap(
+    all_numeric_predictors(),
+    outcome = "class",
+    num_comp = tune(),
+    neighbors = tune(),
+    min_dist = tune()
+  )
+```
+
+Creating workflow set and tuning:
+
+```{r}
+#| label: workflow-set-beans
+#| eval: false
+
+# time-consuming code commented out to speed up rendering
+# ctrl <- control_grid(parallel_over = "everything")
+# bean_res <-
+#   workflow_set(
+#     preproc = list(basic = class ~., pls = pls_rec, umap = umap_rec),
+#     models = list(bayes = bayes_spec, fda = fda_spec,
+#                   rda = rda_spec, bag = bagging_spec,
+#                   mlp = mlp_spec)
+#   ) %>%
+#   workflow_map(
+#     verbose = TRUE,
+#     seed = 1603,
+#     resamples = bean_val,
+#     grid = 10,
+#     metrics = metric_set(roc_auc),
+#     control = ctrl
+#   )
+```
+
+Visualizing results.
+
+```{r}
+#| label: visualize-results-beans
+#| eval: false
+
+rankings <-
+  rank_results(bean_res, select_best = TRUE) %>%
+  mutate(method = map_chr(wflow_id, ~ str_split(.x, "_", simplify = TRUE)[1]))
+
+tidymodels_prefer()
+filter(rankings, rank <= 5) %>% dplyr::select(rank, mean, model, method)
+#> # A tibble: 5 × 4
+#>    rank  mean model               method
+#>   <int> <dbl> <chr>               <chr>
+#> 1     1 0.996 mlp                 pls
+#> 2     2 0.996 discrim_regularized pls
+#> 3     3 0.995 discrim_flexible    basic
+#> 4     4 0.995 naive_Bayes         pls
+#> 5     5 0.994 naive_Bayes         basic
+```
+
+Results of multiclass ROC AUC on testing set:
+
+```{r}
+#| label: eval-metric
+#| eval: false
+
+collect_metrics(rda_res)
+```
