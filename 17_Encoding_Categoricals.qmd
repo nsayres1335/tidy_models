@@ -1,0 +1,212 @@
+---
+title: "Chapter 17. Encoding Categorical Data"
+format: html
+date: last-modified
+execute:
+    cache: true
+code-fold: true
+toc: true
+---
+
+```{r}
+#| label: code-setup
+
+library(tidymodels)
+data(ames)
+ames <- mutate(ames, Sale_Price = log10(Sale_Price))
+
+set.seed(502)
+ames_split <- initial_split(ames, prop = 0.80, strata = Sale_Price)
+ames_train <- training(ames_split)
+ames_test <- testing(ames_split)
+
+ames_rec <-
+  recipe(
+    Sale_Price ~ Neighborhood +
+      Gr_Liv_Area +
+      Year_Built +
+      Bldg_Type +
+      Latitude +
+      Longitude,
+    data = ames_train
+  ) %>%
+  step_log(Gr_Liv_Area, base = 10) %>%
+  step_other(Neighborhood, threshold = 0.01) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_interact(~ Gr_Liv_Area:starts_with("Bldg_Type_")) %>%
+  step_ns(Latitude, Longitude, deg_free = 20)
+
+lm_model <- linear_reg() %>% set_engine("lm")
+
+lm_wflow <-
+  workflow() %>%
+  add_model(lm_model) %>%
+  add_recipe(ames_rec)
+
+lm_fit <- fit(lm_wflow, ames_train)
+```
+
+## 17.3. Using the Outcome for Encoding Predictors
+
+Effect or likelihood encoding uses the outcome variable to help create numerical summaries of categorical predictors. For example, we can compute the mean sale price for each neighborhood in the Ames housing data:
+
+```{r}
+#| label: neighborhood-mean-plot
+
+ames_train %>%
+  group_by(Neighborhood) %>%
+  summarize(
+    mean = mean(Sale_Price),
+    std_err = sd(Sale_Price) / sqrt(length(Sale_Price))
+  ) %>%
+  ggplot(aes(y = reorder(Neighborhood, mean), x = mean)) +
+  geom_point() +
+  geom_errorbar(aes(
+    xmin = mean - 1.64 * std_err,
+    xmax = mean + 1.64 * std_err
+  )) +
+  labs(y = NULL, x = "Price (mean, log scale)")
+```
+
+Works well when cat var has many levels. *embed* package inclues several recipe step functions for different kinds of effects encodings, e.g., step_lencode_glm(), step_lencode_mixed(), and step_lencode_bayes().
+
+```{r}
+#| label: embed-glm
+
+library(embed)
+
+ames_glm <-
+  recipe(
+    Sale_Price ~ Neighborhood +
+      Gr_Liv_Area +
+      Year_Built +
+      Bldg_Type +
+      Latitude +
+      Longitude,
+    data = ames_train
+  ) %>%
+  step_log(Gr_Liv_Area, base = 10) %>%
+  step_lencode_glm(Neighborhood, outcome = vars(Sale_Price)) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_interact(~ Gr_Liv_Area:starts_with("Bldg_Type_")) %>%
+  step_ns(Latitude, Longitude, deg_free = 20)
+
+ames_glm
+```
+
+Can tidy a prepared recipe to see results:
+
+```{r}
+#| label: glm-estimates
+
+glm_estimates <-
+  prep(ames_glm) %>%
+  tidy(number = 2)
+
+glm_estimates
+```
+
+Can seamlessly handle novel factors:
+
+```{r}
+# label: novel-factors
+
+glm_estimates %>%
+  filter(level == "..new")
+```
+
+This value is the predicted price from the GLM when we don't have any specific neighborhood info.
+
+### 17.3.1 Partial Pooling
+
+Partial pooling adjusts the estiamtes of levels w/ small sample sizes towards overall mean. Can uses a mixed or hieracrchical generalized linear model:
+
+```{r}
+#| label: label-partial-pooling
+
+ames_mixed <-
+  recipe(
+    Sale_Price ~ Neighborhood +
+      Gr_Liv_Area +
+      Year_Built +
+      Bldg_Type +
+      Latitude +
+      Longitude,
+    data = ames_train
+  ) %>%
+  step_log(Gr_Liv_Area, base = 10) %>%
+  step_lencode_mixed(Neighborhood, outcome = vars(Sale_Price)) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_interact(~ Gr_Liv_Area:starts_with("Bldg_Type_")) %>%
+  step_ns(Latitude, Longitude, deg_free = 20)
+
+ames_mixed
+
+mixed_estimates <-
+  prep(ames_mixed) %>%
+  tidy(number = 2)
+
+mixed_estimates
+```
+
+New levels are then encoded at close to the same valuse as with the GLM:
+
+```{r}
+#| label: mixed-novel-factors
+
+mixed_estimates %>%
+  filter(level == "..new")
+```
+
+Can use a fully Bayesian hieracrchical models for the effects in the same way with *step_lencode_bayes()*.
+
+Comparing glm and mixed encodings:
+
+```{r}
+#| label: compare-encodings
+
+glm_estimates %>%
+  rename(`no pooling` = value) %>%
+  left_join(
+    mixed_estimates %>%
+      rename(`partial pooling` = value),
+    by = "level"
+  ) %>%
+  left_join(
+    ames_train %>%
+      count(Neighborhood) %>%
+      mutate(level = as.character(Neighborhood))
+  ) %>%
+  ggplot(aes(`no pooling`, `partial pooling`, size = sqrt(n))) +
+  geom_abline(color = "gray50", lty = 2) +
+  geom_point(alpha = 0.7) +
+  coord_fixed()
+#> Warning: Removed 1 rows containing missing values (`geom_point()`).
+```
+
+## 17.4. Feature Hashing
+
+Feature hashing creates a fixed number of numerical features from a categorical predictor by applying a hash function to the levels. Useful when cat var has many levels and we want to limit the number of resulting features. *textrecipes* package includes *step_dummy_hash()* for this purpose.
+
+```{r}
+#| label: textrecipes-hashing
+
+library(textrecipes)
+ames_hash <-
+  recipe(
+    Sale_Price ~ Neighborhood +
+      Gr_Liv_Area +
+      Year_Built +
+      Bldg_Type +
+      Latitude +
+      Longitude,
+    data = ames_train
+  ) %>%
+  step_log(Gr_Liv_Area, base = 10) %>%
+  step_dummy_hash(Neighborhood, signed = FALSE, num_terms = 16L) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_interact(~ Gr_Liv_Area:starts_with("Bldg_Type_")) %>%
+  step_ns(Latitude, Longitude, deg_free = 20)
+
+ames_hash
+```
