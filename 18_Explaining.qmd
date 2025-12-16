@@ -1,0 +1,413 @@
+---
+title: "Chapter 18. Explaining Models and Predictions"
+format: html
+date: last-modified
+execute:
+    cache: true
+code-fold: true
+toc: true
+---
+
+```{r}
+#| label: code-setup
+
+library(tidymodels)
+data(ames)
+ames <- mutate(ames, Sale_Price = log10(Sale_Price))
+
+set.seed(502)
+ames_split <- initial_split(ames, prop = 0.80, strata = Sale_Price)
+ames_train <- training(ames_split)
+ames_test <- testing(ames_split)
+
+ames_rec <-
+  recipe(
+    Sale_Price ~ Neighborhood +
+      Gr_Liv_Area +
+      Year_Built +
+      Bldg_Type +
+      Latitude +
+      Longitude,
+    data = ames_train
+  ) %>%
+  step_log(Gr_Liv_Area, base = 10) %>%
+  step_other(Neighborhood, threshold = 0.01) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_interact(~ Gr_Liv_Area:starts_with("Bldg_Type_")) %>%
+  step_ns(Latitude, Longitude, deg_free = 20)
+
+lm_model <- linear_reg() %>% set_engine("lm")
+
+lm_wflow <-
+  workflow() %>%
+  add_model(lm_model) %>%
+  add_recipe(ames_rec)
+
+lm_fit <- fit(lm_wflow, ames_train)
+
+rf_model <-
+  rand_forest(trees = 1000) %>%
+  set_engine("ranger") %>%
+  set_mode("regression")
+
+rf_wflow <-
+  workflow() %>%
+  add_formula(
+    Sale_Price ~ Neighborhood +
+      Gr_Liv_Area +
+      Year_Built +
+      Bldg_Type +
+      Latitude +
+      Longitude
+  ) %>%
+  add_model(rf_model)
+
+rf_fit <- rf_wflow %>% fit(data = ames_train)
+```
+
+## 18.1. Software for Model Explanations
+
+Can us **DALEX** for model agnostic explanations. See Biecek and Bruzykowski for more thorough explanation. **DALEXtra** provides convenient interface to use DALEX with tidymodels.
+
+Creating the explainer model:
+
+```{r}
+#| label: explainers-setup
+
+library(DALEXtra)
+vip_features <- c(
+  "Neighborhood",
+  "Gr_Liv_Area",
+  "Year_Built",
+  "Bldg_Type",
+  "Latitude",
+  "Longitude"
+)
+
+vip_train <-
+  ames_train %>%
+  select(all_of(vip_features))
+
+explainer_lm <-
+  explain_tidymodels(
+    lm_fit,
+    data = vip_train,
+    y = ames_train$Sale_Price,
+    label = "lm + interactions",
+    verbose = FALSE
+  )
+
+explainer_rf <-
+  explain_tidymodels(
+    rf_fit,
+    data = vip_train,
+    y = ames_train$Sale_Price,
+    label = "random forest",
+    verbose = FALSE
+  )
+```
+
+
+## 18.2. Local Explanations
+
+Local model explanations focus on understanding individual predictions. *predict_parts* computes how contributions attributed to individual features change the mean model's prediction for a particular observation.
+
+```{r}
+#| label: lm-local-explanations
+
+duplex <- vip_train[120, ]
+
+lm_breakdown <- predict_parts(
+  explainer = explainer_lm,
+  new_observation = duplex
+)
+lm_breakdown
+```
+
+For the this lm and particular feature, the living area has the largest contribution.
+
+Most important features for random forest are slightly different:
+
+```{r}
+#| label: rf-local-explanations
+
+rf_breakdown <- predict_parts(
+  explainer = explainer_rf,
+  new_observation = duplex
+)
+rf_breakdown
+```
+
+Order matters for local explanations. Can adjust rf feature order to the same as the default for lm (chosen via a heursitic):
+
+```{r}
+#| label: rf-local-explanations-ordered
+
+predict_parts(
+  explainer = explainer_rf,
+  new_observation = duplex,
+  order = lm_breakdown$variable_name
+)
+```
+
+SHAP takes advantage of this ordering to compute average contributions across all possible feature orderings. Computing SHAP attributions for duplex using 20 random orderings:
+
+```{r}
+#| label: shap-explanations
+
+set.seed(1801)
+shap_duplex <-
+  predict_parts(
+    explainer = explainer_rf,
+    new_observation = duplex,
+    type = "shap",
+    B = 20
+  )
+```
+
+Can visualize using DALEX's default plot method:
+
+```{r}
+#| label: shap-plot
+
+plot(shap_duplex)
+```
+
+Or we can make a custom plot:
+
+```{r}
+#| label: shap-custom-plot
+
+library(forcats)
+shap_duplex %>%
+  group_by(variable) %>%
+  mutate(mean_val = mean(contribution)) %>%
+  ungroup() %>%
+  mutate(variable = fct_reorder(variable, abs(mean_val))) %>%
+  ggplot(aes(contribution, variable, fill = mean_val > 0)) +
+  geom_col(
+    data = ~ distinct(., variable, mean_val),
+    aes(mean_val, variable),
+    alpha = 0.5
+  ) +
+  geom_boxplot(width = 0.5) +
+  theme(legend.position = "none") +
+  scale_fill_viridis_d() +
+  labs(y = NULL)
+```
+
+Let's look at a different observation:
+
+```{r}
+#| label: big-house-shap
+
+big_house <- vip_train[1269, ]
+big_house
+
+set.seed(1802)
+shap_house <-
+  predict_parts(
+    explainer = explainer_rf,
+    new_observation = big_house,
+    type = "shap",
+    B = 20
+  )
+
+shap_house %>%
+  group_by(variable) %>%
+  mutate(mean_val = mean(contribution)) %>%
+  ungroup() %>%
+  mutate(variable = fct_reorder(variable, abs(mean_val))) %>%
+  ggplot(aes(contribution, variable, fill = mean_val > 0)) +
+  geom_col(
+    data = ~ distinct(., variable, mean_val),
+    aes(mean_val, variable),
+    alpha = 0.5
+  ) +
+  geom_boxplot(width = 0.5) +
+  theme(legend.position = "none") +
+  scale_fill_viridis_d() +
+  labs(y = NULL)
+```
+
+For rf model of big_house, the living area and year build have the largest positive contributions, while the neighborhood and longitude drag the price down a fit.
+
+18.3. Global Explanations
+
+Global model explanations try to understand most important features overall for a given model and training set.
+
+```{r}
+#| label: global-vip
+
+set.seed(1803)
+vip_lm <- model_parts(explainer_lm, loss_function = loss_root_mean_square)
+set.seed(1804)
+vip_rf <- model_parts(explainer_rf, loss_function = loss_root_mean_square)
+```
+
+Can use default plot method:
+
+```{r}
+#| label: global-vip-plot
+
+plot(vip_lm, vip_rf)
+```
+
+Or custom:
+
+```{r}
+
+#| label: FUNC-ggplot-imp
+
+ggplot_imp <- function(...) {
+  obj <- list(...)
+  metric_name <- attr(obj[[1]], "loss_name")
+  metric_lab <- paste(
+    metric_name,
+    "after permutations\n(higher indicates more important)"
+  )
+
+  full_vip <- bind_rows(obj) %>%
+    filter(variable != "_baseline_")
+
+  perm_vals <- full_vip %>%
+    filter(variable == "_full_model_") %>%
+    group_by(label) %>%
+    summarise(dropout_loss = mean(dropout_loss))
+
+  p <- full_vip %>%
+    filter(variable != "_full_model_") %>%
+    mutate(variable = fct_reorder(variable, dropout_loss)) %>%
+    ggplot(aes(dropout_loss, variable))
+  if (length(obj) > 1) {
+    p <- p +
+      facet_wrap(vars(label)) +
+      geom_vline(
+        data = perm_vals,
+        aes(xintercept = dropout_loss, color = label),
+        linewidth = 1.4,
+        lty = 2,
+        alpha = 0.7
+      ) +
+      geom_boxplot(aes(color = label, fill = label), alpha = 0.2)
+  } else {
+    p <- p +
+      geom_vline(
+        data = perm_vals,
+        aes(xintercept = dropout_loss),
+        linewidth = 1.4,
+        lty = 2,
+        alpha = 0.7
+      ) +
+      geom_boxplot(fill = "#91CBD765", alpha = 0.4)
+  }
+  p +
+    theme(legend.position = "none") +
+    labs(x = metric_lab, y = NULL, fill = NULL, color = NULL)
+}
+```
+
+```{r}
+#| label: global-vip-custom-plot
+
+ggplot_imp(vip_lm, vip_rf)
+```
+
+The dashed line shows the RMSE for the full model. Overall, living area and year build are the most important features for both models. The lm model relies more heavily on neighborhood than the rf model (where is 2nd least important).
+
+## 18.4. Building Global from Local Explanations
+
+Global explanations can also be built from local explanations. For example, we can compute individual profiles for multiple observations and aggregate them. Known as partial dependence profiles (PDPs) or accumulated local effects (ALEs).
+
+```{r}
+#| label: pdp-age
+
+set.seed(1805)
+pdp_age <- model_profile(explainer_rf, N = 500, variables = "Year_Built")
+```
+
+Custom plotting function:
+
+```{r}
+#| label: FUNC-ggplot-pdp
+
+ggplot_pdp <- function(obj, x) {
+  p <-
+    as_tibble(obj$agr_profiles) %>%
+    mutate(`_label_` = stringr::str_remove(`_label_`, "^[^_]*_")) %>%
+    ggplot(aes(`_x_`, `_yhat_`)) +
+    geom_line(
+      data = as_tibble(obj$cp_profiles),
+      aes(x = {{ x }}, group = `_ids_`),
+      linewidth = 0.5,
+      alpha = 0.05,
+      color = "gray50"
+    )
+
+  num_colors <- n_distinct(obj$agr_profiles$`_label_`)
+
+  if (num_colors > 1) {
+    p <- p + geom_line(aes(color = `_label_`), linewidth = 1.2, alpha = 0.8)
+  } else {
+    p <- p + geom_line(color = "midnightblue", linewidth = 1.2, alpha = 0.8)
+  }
+
+  p
+}
+```
+
+PDP for year built in rf model:
+
+```{r}
+#| label: pdp-age-plot
+
+ggplot_pdp(pdp_age, Year_Built) +
+  labs(x = "Year built", y = "Sale Price (log)", color = NULL)
+```
+
+Shows nonlinear behavior: newer homes tend to have higher sale prices.
+
+Looking at living area:
+
+```{r}
+#| label: pdp-build-type
+
+set.seed(1806)
+pdp_liv <- model_profile(
+  explainer_rf,
+  N = 1000,
+  variables = "Gr_Liv_Area",
+  groups = "Bldg_Type"
+)
+
+ggplot_pdp(pdp_liv, Gr_Liv_Area) +
+  scale_x_log10() +
+  scale_color_brewer(palette = "Dark2") +
+  labs(x = "Gross living area", y = "Sale Price (log)", color = NULL)
+```
+
+Another nonlinear trend. Sale price increases the most between 1,000 and 3,000 sq ft, then levels off.
+
+Faceting by building type:
+
+```{r}
+#| label: pdp-build-type-faceted
+
+as_tibble(pdp_liv$agr_profiles) %>%
+  mutate(Bldg_Type = stringr::str_remove(`_label_`, "random forest_")) %>%
+  ggplot(aes(`_x_`, `_yhat_`, color = Bldg_Type)) +
+  geom_line(
+    data = as_tibble(pdp_liv$cp_profiles),
+    aes(x = Gr_Liv_Area, group = `_ids_`),
+    linewidth = 0.5,
+    alpha = 0.1,
+    color = "gray50"
+  ) +
+  geom_line(linewidth = 1.2, alpha = 0.8, show.legend = FALSE) +
+  scale_x_log10() +
+  facet_wrap(~Bldg_Type) +
+  scale_color_brewer(palette = "Dark2") +
+  labs(x = "Gross living area", y = "Sale Price (log)", color = NULL)
+```
+
+There is no one correct approach. See Biecek and Bruzykowski (2021) and Molnar (2020) for more details on model explanations.
